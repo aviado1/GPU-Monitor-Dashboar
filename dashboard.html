@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPU Monitor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #1a1a1a;
+            color: #fff;
+            height: 100vh;
+            position: relative;
+            overflow: hidden;
+        }
+        h1 {
+            text-align: center;
+            margin-top: 20px;
+        }
+        h2 {
+            text-align: center;
+            color: #888;
+            margin-top: 0;
+        }
+        .server {
+            background-color: #333;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            position: absolute;
+            cursor: grab;
+            width: 700px;
+        }
+        .server:active {
+            cursor: grabbing;
+        }
+        canvas {
+            width: 100%;
+            height: 250px;
+        }
+    </style>
+</head>
+<body>
+    <h1>GPU Monitor Dashboard</h1>
+    <h2>Developed by Aviad Ofek</h2>
+    <div id="servers"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.4/Chart.min.js"></script>
+    <script>
+        const refreshRate = 1000;
+        const thresholds = { green: 50, yellow: 90 };
+        let chartInstances = {};
+
+        const getColor = value => {
+            if (value <= thresholds.green) return '#33FF57';
+            if (value <= thresholds.yellow) return '#FFFF33';
+            return '#ff0000';
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchAndRenderCharts();
+            setInterval(fetchAndRenderCharts, refreshRate);
+        });
+
+        const makeDraggable = (element) => {
+            let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+            element.onmousedown = function (e) {
+                e.preventDefault();
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                document.onmouseup = () => {
+                    document.onmouseup = null;
+                    document.onmousemove = null;
+                };
+                document.onmousemove = function (event) {
+                    event.preventDefault();
+                    pos1 = pos3 - event.clientX;
+                    pos2 = pos4 - event.clientY;
+                    pos3 = event.clientX;
+                    pos4 = event.clientY;
+                    element.style.top = (element.offsetTop - pos2) + "px";
+                    element.style.left = (element.offsetLeft - pos1) + "px";
+                };
+            };
+        };
+
+        async function fetchAndRenderCharts() {
+            const response = await fetch('/gpu_stats');
+            const data = await response.json();
+            const serversDiv = document.getElementById('servers');
+
+            for (const [serverName, serverData] of Object.entries(data)) {
+                let serverDiv = document.getElementById(serverName);
+                if (!serverDiv) {
+                    serverDiv = document.createElement('div');
+                    serverDiv.id = serverName;
+                    serverDiv.className = 'server';
+                    serverDiv.innerHTML = `<h2>Server ${serverName}</h2>`;
+                    const canvas = document.createElement('canvas');
+                    serverDiv.appendChild(canvas);
+                    serversDiv.appendChild(serverDiv);
+                    makeDraggable(serverDiv);
+                }
+
+                let chart = chartInstances[serverName];
+                if (!chart) {
+                    chart = new Chart(serverDiv.querySelector('canvas'), {
+                        type: 'bar',
+                        data: {
+                            labels: ['GPU Load', 'Memory Usage', 'Temperature'],
+                            datasets: serverData.map((gpu, i) => ({
+                                label: `GPU ${i}`,
+                                data: [
+                                    parseInt(gpu.gpu_load),
+                                    parseInt(gpu.memory_usage),
+                                    mapTemperature(parseInt(gpu.temperature))
+                                ],
+                                backgroundColor: [
+                                    getColor(parseInt(gpu.gpu_load)),
+                                    getColor(parseInt(gpu.memory_usage)),
+                                    getColor(mapTemperature(parseInt(gpu.temperature)))
+                                ]
+                            }))
+                        },
+                        options: {
+                            responsive: true,
+                            animation: {
+                                duration: 800
+                            },
+                            scales: {
+                                yAxes: [{
+                                    ticks: {
+                                        beginAtZero: true,
+                                        max: 100,
+                                        fontColor: 'white' // Change y-axis tick color to white
+                                    },
+                                    gridLines: {
+                                        color: 'rgba(255, 255, 255, 0.1)' // Change y-axis grid lines to light white
+                                    }
+                                }],
+                                xAxes: [{
+                                    ticks: {
+                                        fontColor: 'white' // Change x-axis tick color to white
+                                    },
+                                    gridLines: {
+                                        color: 'rgba(255, 255, 255, 0.1)' // Change x-axis grid lines to light white
+                                    }
+                                }]
+                            },
+                            legend: {
+                                labels: {
+                                    fontColor: 'white' // Change the legend text to white
+                                }
+                            }
+                        }
+                    });
+                    chartInstances[serverName] = chart;
+                } else {
+                    serverData.forEach((gpu, i) => {
+                        if (chart.data.datasets[i]) {
+                            chart.data.datasets[i].data = [
+                                parseInt(gpu.gpu_load),
+                                parseInt(gpu.memory_usage),
+                                mapTemperature(parseInt(gpu.temperature))
+                            ];
+                            chart.data.datasets[i].backgroundColor = [
+                                getColor(parseInt(gpu.gpu_load)),
+                                getColor(parseInt(gpu.memory_usage)),
+                                getColor(mapTemperature(parseInt(gpu.temperature)))
+                            ];
+                        }
+                    });
+                    chart.update();
+                }
+            }
+        }
+
+        function mapTemperature(temperature) {
+            // Map the temperature to a 0-100 scale
+            const maxTemperature = 100;
+            return Math.min(Math.max(temperature, 0), maxTemperature);
+        }
+    </script>
+</body>
+</html>
